@@ -1,0 +1,19 @@
+# Scan artifacts
+*.sarif
+zap-report.*
+report_*.html
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Go
+/examples/app/app
+*.test
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

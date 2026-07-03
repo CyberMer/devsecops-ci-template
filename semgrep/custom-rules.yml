@@ -1,0 +1,35 @@
+rules:
+  # A small set of hand-written rules to complement the Semgrep registry packs.
+  # These target patterns the generic packs are lax about in service code.
+
+  - id: plaintext-http-endpoint
+    languages: [generic]
+    severity: WARNING
+    message: >
+      Plaintext http:// endpoint in configuration. Internal service traffic
+      should be TLS-terminated (mTLS / ACME-issued certs). Prefer https://.
+    patterns:
+      - pattern-regex: 'http://(?!localhost|127\.0\.0\.1)'
+    paths:
+      include: ["*.yml", "*.yaml", "*.tf", "*.env*"]
+      exclude: ["semgrep/**"] # don't match this rule file's own text
+
+  - id: kubernetes-privileged-container
+    languages: [yaml]
+    severity: ERROR
+    message: >
+      Container runs privileged. This grants host-level access and breaks
+      workload isolation. Drop privileged and set the least-privilege
+      securityContext instead.
+    pattern: "privileged: true"
+
+  - id: dockerfile-user-root
+    languages: [dockerfile]
+    severity: WARNING
+    message: >
+      Dockerfile runs as root. Declare a non-root USER to limit blast radius
+      on compromise.
+    patterns:
+      - pattern-either:
+          - pattern: USER root
+          - pattern: USER 0

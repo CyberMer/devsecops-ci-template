@@ -1,0 +1,25 @@
+# Gitleaks configuration — extends the built-in rule set.
+# https://github.com/gitleaks/gitleaks
+
+title = "devsecops-ci-template gitleaks config"
+
+[extend]
+useDefault = true # keep all upstream rules, add/override below
+
+# Example of a project-specific rule: internal PKI private keys must never
+# be committed. The default keyset covers most, this makes intent explicit.
+[[rules]]
+id = "internal-pki-private-key"
+description = "Internal PKI / TLS private key material"
+regex = '''-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----'''
+keywords = ["private key"]
+
+# Paths that legitimately contain test fixtures / documentation examples and
+# should not trip the scanner.
+[allowlist]
+description = "Ignore documentation and test fixtures"
+paths = [
+  '''docs/.*''',
+  '''examples/.*_test\..*''',
+  '''.*\.md''',
+]

@@ -1,0 +1,14 @@
+# OWASP ZAP baseline rule tuning.
+# Columns: <pluginId>	<action: WARN|FAIL|IGNORE>	<optional comment>
+# Anything not listed keeps its default (WARN in baseline mode).
+# Full plugin id reference: https://www.zaproxy.org/docs/alerts/
+
+10015	FAIL	Incomplete or no cache-control header
+10020	FAIL	Missing anti-clickjacking (X-Frame-Options / CSP frame-ancestors)
+10021	FAIL	Missing X-Content-Type-Options
+10035	FAIL	Strict-Transport-Security header not set
+10038	FAIL	Content Security Policy header not set
+40012	FAIL	Reflected XSS
+40018	FAIL	SQL injection
+90022	WARN	Application error disclosure
+10096	IGNORE	Timestamp disclosure — noisy on the sample app

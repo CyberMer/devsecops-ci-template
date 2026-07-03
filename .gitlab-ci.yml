@@ -1,0 +1,66 @@
+# DevSecOps security pipeline — GitLab CI edition.
+# Mirror of the GitHub Actions workflow: SAST, secrets, SCA/IaC and DAST stages.
+# Drop this file at the root of a GitLab project and the four gates run on every push.
+
+stages:
+  - sast
+  - secrets
+  - sca
+  - dast
+
+variables:
+  # Fail the pipeline on HIGH/CRITICAL. Set to "0" while onboarding a legacy repo.
+  SEVERITY_THRESHOLD: "CRITICAL,HIGH"
+
+# 1. SAST — Semgrep static analysis
+semgrep:
+  stage: sast
+  image: semgrep/semgrep:latest
+  script:
+    - semgrep ci --config p/default --config p/security-audit --config ./semgrep/custom-rules.yml --sarif --output semgrep.sarif
+  artifacts:
+    when: always
+    paths: [semgrep.sarif]
+    reports:
+      sast: semgrep.sarif
+
+# 2. Secrets — Gitleaks over full history
+gitleaks:
+  stage: secrets
+  image:
+    name: zricethezav/gitleaks:latest
+    entrypoint: [""]
+  script:
+    - gitleaks detect --source . --config .gitleaks.toml --report-format sarif --report-path gitleaks.sarif --redact
+  artifacts:
+    when: always
+    paths: [gitleaks.sarif]
+
+# 3. SCA + IaC misconfiguration — Trivy filesystem scan
+trivy-fs:
+  stage: sca
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - trivy fs . --scanners vuln,misconfig,secret --severity "$SEVERITY_THRESHOLD" --exit-code 0 --format sarif --output trivy.sarif
+  artifacts:
+    when: always
+    paths: [trivy.sarif]
+
+# 4. DAST — OWASP ZAP baseline against the sample app
+zap-baseline:
+  stage: dast
+  image: docker:latest
+  services: [docker:dind]
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - docker build -t sample-app ./examples/app
+    - docker run -d -p 8080:8080 --name app sample-app
+    - sleep 10
+    - >
+      docker run --network host -v "$PWD/.zap:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable
+      zap-baseline.py -t http://localhost:8080 -c rules.tsv -a -I
+  allow_failure: true

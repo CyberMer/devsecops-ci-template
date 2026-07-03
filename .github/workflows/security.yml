@@ -1,0 +1,91 @@
+name: DevSecOps Pipeline
+
+# Runs the full shift-left security suite on every push and PR, plus a weekly
+# scheduled scan so drift and newly-disclosed CVEs are caught even without commits.
+# Each tool runs from its official container image — identical to `make` locally —
+# and writes SARIF that is uploaded to the Security tab.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # every Monday 06:00 UTC
+
+permissions:
+  contents: read
+  security-events: write # required to upload SARIF to the Security tab
+
+jobs:
+  # 1. SAST — static analysis of first-party code
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Semgrep
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep \
+            semgrep scan \
+              --config p/default --config p/security-audit --config p/secrets \
+              --config semgrep/custom-rules.yml \
+              --sarif --output semgrep.sarif
+      - name: Upload findings
+        if: always() && hashFiles('semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  # 2. Secrets — catch credentials before they reach history
+  secrets:
+    name: Secret scanning (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the whole repo is scanned
+      - name: Run Gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo zricethezav/gitleaks:latest \
+            detect --source . --config .gitleaks.toml --redact --no-banner -v
+
+  # 3. SCA + IaC + secrets — Trivy filesystem scan
+  trivy:
+    name: SCA / IaC (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Trivy
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo aquasec/trivy:latest \
+            fs . --scanners vuln,misconfig,secret \
+            --severity CRITICAL,HIGH \
+            --exit-code 0 \
+            --format sarif --output trivy-fs.sarif
+      - name: Upload findings
+        if: always() && hashFiles('trivy-fs.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  # 4. DAST — dynamic scan against the running sample app
+  dast:
+    name: DAST (OWASP ZAP)
+    runs-on: ubuntu-latest
+    needs: [sast, trivy]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build & start sample app
+        run: |
+          docker build -t sample-app ./examples/app
+          docker run -d -p 8080:8080 --name app sample-app
+          timeout 30 sh -c 'until curl -sf http://localhost:8080/health; do sleep 1; done'
+      - name: ZAP baseline scan
+        # Run ZAP directly (same as `make dast`) rather than the wrapper action,
+        # which depends on a deprecated artifact upload. `-I` = don't fail on
+        # warnings; the job still fails on any FAIL-mapped alert in rules.tsv.
+        run: |
+          docker run --rm --network host -v "$PWD/.zap:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://localhost:8080 -c rules.tsv -a -I
